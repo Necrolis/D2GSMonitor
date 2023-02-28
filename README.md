@@ -91,4 +91,5 @@ As an example:
 	"endpoints": {
 		"data": "https://my.domain.com/api/receive_data?MyCustomParam=123&AnotherCustomParam=abc"
 	}
-}```
+}
+```
