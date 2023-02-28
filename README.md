@@ -1,5 +1,6 @@
 # D2GSMonitor
 A simple yet powerful monitoring tool for D2GS, primarily aimed at windows systems, but should also work with Wine based setups.
+D2GSMonitor and its config file should be in the same folder as your D2GS.exe.
 
 Requires .Net 6.0 Framework (Desktop) Runtime, you can get it from [Microsoft](https://dotnet.microsoft.com/en-us/download/dotnet/6.0).
 
@@ -23,9 +24,9 @@ The format of `config.json` is fairly straight-forward.
 Here is the schema with inline documentation: 
 ```json
 {
-	/* a nam to uniquely identify this GS instance */
+	/* a name to uniquely identify this GS instance */
 	"gsname": string,
-	/* ULR endpoints used to send and get data */
+	/* URL endpoints used to send and retreive data */
 	"endpoints": {
 		/* URL to POST game & status data to */
 		"data": string|null,
@@ -37,40 +38,40 @@ Here is the schema with inline documentation:
 		"registry": string|null
 	},
 	"auth": {
-		/* The name of the HTTP header to use for auth */
+		/* The name of the HTTP header to use for authentication */
 		"header": string|null,
-		/* The value of the HTTP header to use for auth */
+		/* The value of the HTTP header to use for authentication */
 		"value": string|null
 	},
 	"telnet": {
-		/* your local telnet port, 0 to disable */
+		/* your local telnet port, 0 to disable telnet commands */
 		"port": int,
 		/* your local telnet password */
 		"password": string|null
 	},
-	/* time in minutes before the GS should be automatically restarted */
+	/* time in minutes before the GS should be automatically restarted (requires telnet) */
 	"restart_duration": int,
-	/* wait time in seconds before the GS is forcefully restarted after a restart command */
+	/* wait time in seconds before the GS is forcefully restarted after a restart command was sent */
 	"restart_timeout": int,
 	"update": {
-		/* update all files using the manifest URL */
+		/* try update all files using the manifest URL on launch */
 		"files": bool,
-		/* update the registry using the registry URL */
+		/* update the registry using the registry URL on launch */
 		"registry": bool
 	},
 	"report": {
-		/* time in seconds between each status report, set to 0 to disable */
+		/* time in seconds between each status report, set to 0 to disable (requires endpoints.data) */
 		"status": int,
-		/* time in seconds between each games report, set to 0 to disable */
+		/* time in seconds between each games report, set to 0 to disable (requires endpoints.data) */
 		"games": int,
 	},
 	"watchdog": {
-		/* offset of the GE update timer in D2Server.dll */
+		/* offset of the GE update timer in D2Server.dll, 1.13c: 69364 */
 		"offest": int,
-		/* time in milliseconds before the game is considered deadlocked */
+		/* time in milliseconds before the GE is considered deadlocked */
 		"timeout": int
 	},
-	/* register to start at system start  */
+	/* register to start D2GSMonitor at system start */
 	"autostart": bool
 }
 ```
@@ -79,7 +80,15 @@ Here is the schema with inline documentation:
 All data sent out via web requests by D2GSMonitor is JSON encoded.
 The format of the messages can be grok'ed from JSON.cs with `JSON.Event` and `JSON.Data` being the respective top-level JSON schema's.
 
-It is advised to secure your recieve endpoints by setting the `auth_header` and `auth_value` members.
-This settings pair can be used to create a number of different HTTP header style authentication methods, from basic HTTP auth to API token based auth.
+It is advised to secure your receive endpoints by setting the `auth_header` and `auth_value` members.
+This settings pair can be used to create a number of different HTTP header style authentication methods, from basic HTTP authentication to API token based authentication.
 
-If you want to pass additional data, you can use URL query parameters as part of each endpoint's URL. 
+If you want to pass additional data, you can use URL query parameters as part of each endpoint's URL (remember to correctly URL encode any special characters).
+As an example:
+```json
+/* in config.json */
+{
+	"endpoints": {
+		"data": "https://my.domain.com/api/receive_data?MyCustomParam=123&AnotherCustomParam=abc"
+	}
+}```
