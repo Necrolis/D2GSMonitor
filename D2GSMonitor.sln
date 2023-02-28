@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33403.182
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "D2GSMonitor", "D2GSMonitor\D2GSMonitor.csproj", "{26371E93-0995-4B35-9809-FB349EA8CD10}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{26371E93-0995-4B35-9809-FB349EA8CD10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{26371E93-0995-4B35-9809-FB349EA8CD10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{26371E93-0995-4B35-9809-FB349EA8CD10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{26371E93-0995-4B35-9809-FB349EA8CD10}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {45CEA91E-94B2-4EAC-A65C-7EFEBE17B876}
+	EndGlobalSection
+EndGlobal
