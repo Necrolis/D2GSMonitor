@@ -1,8 +1,8 @@
 # D2GSMonitor
 A simple yet powerful monitoring tool for D2GS, primarily aimed at windows systems, but should also work with Wine based setups.
-D2GSMonitor and its config file should be in the same folder as your D2GS.exe.
+By default D2GSMonitor assumes that D2GS.exe is in the same folder, however you can override this behavior in the config file.
 
-Requires .Net 6.0 Framework (Desktop) Runtime, you can get it from [Microsoft](https://dotnet.microsoft.com/en-us/download/dotnet/6.0).
+Requires .Net 9.0 Framework (Desktop) Runtime, you can get it from [Microsoft](https://dotnet.microsoft.com/en-us/download/dotnet/9.0).
 
 ## Features
 D2GSMonitor provides the following features:
@@ -10,15 +10,15 @@ D2GSMonitor provides the following features:
  - Timed restarting of D2GS
  - Deadlock detection of D2GS with forced restarting
  - Automatic file downloads and updating
- - REST+JSON based Push'ing of events (start, restart, failure) & data (games list and status) with optional header for API or basic HTTP auth'ing
+ - REST+JSON based Push'ing of events (start, restart, failure) & data (gamelist and status) with optional header for API or basic HTTP auth'ing
  - Automatically sets admin and compatibility requirements (windows only)
  - Automatically sets all required Registry keys (windows only)
  - Register for automatic startup (windows only)
  
  ## Configuration
-All needed configuration is done via the `config.json` file. It needs to be in the same directory as D2GSMonitor.
+All needed configuration is done via the `config.json` file. It must be in the same directory as D2GSMonitor.
 
-**note that changes will only take effect when you restart D2GSMonitor**
+**Note that config changes will only take effect when you restart D2GSMonitor**
 
 The format of `config.json` is fairly straight-forward. 
 Here is the schema with inline documentation: 
@@ -26,6 +26,8 @@ Here is the schema with inline documentation:
 {
 	/* a name to uniquely identify this GS instance */
 	"gsname": string,
+	/* an override path to the D2GS.exe to use */
+	"executable": string,	
 	/* URL endpoints used to send and retreive data */
 	"endpoints": {
 		/* URL to POST game & status data to */
@@ -75,13 +77,15 @@ Here is the schema with inline documentation:
 	"autostart": bool
 }
 ```
+`config.json.example` provides a skeleton file for you to copy and edit. 
+D2GSMonitor will also create an empty config file if it cannot find one.
 
 ## Receiving JSON
 All data sent out via web requests by D2GSMonitor is JSON encoded.
 The format of the messages can be grok'ed from JSON.cs with `JSON.Event` and `JSON.Data` being the respective top-level JSON schema's.
 
 It is advised to secure your receive endpoints by setting the `auth_header` and `auth_value` members.
-This settings pair can be used to create a number of different HTTP header style authentication methods, from basic HTTP authentication to API token based authentication.
+The settings pair can be used to create a number of different HTTP header style authentication methods, from basic HTTP authentication to API token based authentication.
 
 If you want to pass additional data, you can use URL query parameters as part of each endpoint's URL (remember to correctly URL encode any special characters).
 As an example:

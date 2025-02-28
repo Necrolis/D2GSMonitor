@@ -1,0 +1,33 @@
+{
+	"gsname": "D2GS",
+    "executable": null,
+	"endpoints": {
+		"data": null,
+		"events": null,
+		"manifest": null,
+		"registry": null
+	},
+	"auth": {
+		"header": null,
+		"value": null
+	},
+	"telnet": {
+		"port": 8888,
+		"password": null
+	},
+	"restart_duration": 240,
+	"restart_timeout": 30,
+	"update": {
+		"files": false,
+		"registry": false
+	},
+	"report": {
+		"status": 0,
+		"games": 0,
+	},
+	"watchdog": {
+		"offest": 69364,
+		"timeout": 30000
+	},
+	"autostart": true
+}

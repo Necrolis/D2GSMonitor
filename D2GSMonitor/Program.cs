@@ -1,20 +1,13 @@
-﻿using System;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Http;
-using System.Reflection.Metadata.Ecma335;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text.Json.Nodes;
-using System.Text;
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 using Newtonsoft.Json;
 using PrimS.Telnet;
-using static D2GSMonitor.JSON;
+using System.Diagnostics;
+using System.Net;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
-using System.Net.NetworkInformation;
-using static System.Net.Mime.MediaTypeNames;
-using System.Reflection;
+using static D2GSMonitor.JSON;
 
 namespace D2GSMonitor
 {
@@ -23,13 +16,22 @@ namespace D2GSMonitor
         private static TimeSpan _restartTime = TimeSpan.FromHours(24);
         private static TimeSpan _exitWaitTime = TimeSpan.FromMinutes(5);
         private static readonly HttpClient _httpClient = new HttpClient();
+        private static DateTime reportGamesLast = DateTime.Now;
+        private static DateTime reportStatusLast = DateTime.Now;
 
         static async Task Main(string[] args)
         {
-            var config = JsonConvert.DeserializeObject<JSON.Config>(File.ReadAllText("config.json"));
+            if (!File.Exists("config.json"))
+            {
+                CreateDefaultConfig();
+                Console.WriteLine("Config.json does not exist, a default has been generated, please configure and restart!");
+                return;
+            }
+
+            var config = JsonConvert.DeserializeObject<Config>(File.ReadAllText("config.json"));
             if (config == null)
             {
-                Console.WriteLine("Unable to load config.json!");
+                Console.WriteLine("Unable to load or parse config.json");
                 return;
             }
 
@@ -42,9 +44,146 @@ namespace D2GSMonitor
                 _httpClient.DefaultRequestHeaders.Add(config.CommandAuth.Header, config.CommandAuth.Value);
             }
 
+            await UpdateFiles(config);
+            await UpdateRegistry(config);
+
+            var gsInfo = new FileInfo(string.IsNullOrEmpty(config.GSExecutablePath) ? Path.Join(Directory.GetCurrentDirectory(), "D2GS.exe") : config.GSExecutablePath);
+            if (gsInfo == null || !gsInfo.Exists)
+            {
+                Console.WriteLine($"Cannot find `{gsInfo?.Directory?.FullName}`!");
+                return;
+            }
+
+            SetAppCompat(gsInfo.FullName);
+
+            var procInfo = new ProcessStartInfo
+            {
+                FileName = gsInfo.Directory?.FullName,
+                Verb = "runas",
+                UseShellExecute = true
+            };
+
+            while (true)
+            {
+                var start = DateTime.Now;
+                var proc = Process.Start(procInfo);
+                if (proc == null)
+                {
+                    Console.WriteLine($"Unable to start `{gsInfo.Directory?.FullName}`!");
+                    break;
+                }
+
+                if (!string.IsNullOrEmpty(config.CommandEndpoints?.Events))
+                {
+                    _ = HttpPost(config.CommandEndpoints.Events, JsonConvert.SerializeObject(new Event
+                    {
+                        Type = "start",
+                        Data = new Dictionary<string, object> {
+                            {"gsname", config.GSName ?? string.Empty},
+                            {"time", DateTime.UtcNow},
+                        }
+                    }));
+                }
+
+                Console.WriteLine("Starting Server");
+                bool restartPending = false;
+                bool deadlockDetected = false;
+                DateTime exitStart = new DateTime(0);
+                IntPtr watchdogAddress = GetGSWatchDogTimerAddress(proc, config.WatchDog?.TickOffset);
+
+                while (!proc.WaitForExit(2500))
+                {
+                    var now = DateTime.Now;
+
+                    if (restartPending && now - exitStart > _exitWaitTime.Add(TimeSpan.FromSeconds(30)))
+                    {
+                        Console.WriteLine("Force Stopping Server");
+                        proc.Refresh();
+                        proc.CloseMainWindow();
+                        proc.Close();
+                    }
+
+                    if (config.Telnet != null)
+                    {
+                        await DispatchReports(config, now);
+
+                        if (now - start > _restartTime)
+                        {
+                            Console.WriteLine("Restarting Server");
+                            await IssueTelnetCommand(config.Telnet, $"restart {config.RestartWaitTime}");
+                            restartPending = true;
+                            exitStart = DateTime.Now;
+                        }
+                    }
+
+                    uint watchdog = GetGSWatchDogTimer(proc.Handle, watchdogAddress);
+                    if (watchdog > 0 && config.WatchDog != null && config.WatchDog.Timeout > 0)
+                    {
+                        if (GetTickCount() - watchdog > config.WatchDog.Timeout)
+                        {
+                            Console.WriteLine("D2GE has deadlocked, queing restart");
+                            deadlockDetected = true;
+                            restartPending = true;
+                        }
+                    }
+                }
+
+                var reason = restartPending ? "routine" : (deadlockDetected ? "deadlock" : "crash");
+                if (!string.IsNullOrEmpty(config.CommandEndpoints?.Events))
+                {
+                    _ = HttpPost(config.CommandEndpoints.Events, JsonConvert.SerializeObject(new Event
+                    {
+                        Type = "restart",
+                        Data = new Dictionary<string, object> {
+                            {"gsname", config.GSName ?? string.Empty},
+                            {"time", DateTime.UtcNow},
+                            {"reason", reason}
+                        }
+                    }));
+                }
+
+                Console.WriteLine($"Server Stopped ({reason})");
+                Thread.Sleep(1000);
+            }
+        }
+
+        private static void CreateDefaultConfig()
+        {
+            var config = new Config
+            {
+                GSName = "D2GS",
+                GSExecutablePath = "",
+                CommandEndpoints = new EndpointInfo(),
+                CommandAuth = new AuthInfo(),
+                Telnet = new TelnetInfo
+                {
+                    Port = 8888,
+                    Password = string.Empty
+                },
+                RestartTime = 240,
+                RestartWaitTime = 30,
+                Update = new UpdateInfo(),
+                Reporting = new ReportingInfo(),
+                WatchDog = new WatchDogInfo
+                {
+                    TickOffset = 69364,
+                    Timeout = 30000
+                },
+                AutoStart = false
+            };
+
+            using (var file = File.CreateText("config.json"))
+            {
+                var serializer = new JsonSerializer();
+                serializer.Serialize(file, config);
+            }
+        }
+
+        private static async Task UpdateFiles(Config config)
+        {
             if (config.Update != null && config.Update.Files && !string.IsNullOrEmpty(config.CommandEndpoints?.Manifest))
             {
-                var files = await HttpGetJSON<List<JSON.FileDownload>>(config.CommandEndpoints.Manifest);
+                var files = await HttpGetJSON<List<FileDownload>>(config.CommandEndpoints.Manifest);
                 if (files != null)
                 {
                     Console.WriteLine("Running File Update");
@@ -81,11 +220,14 @@ namespace D2GSMonitor
                     }
                 }
             }
+        }
 
+        private static async Task UpdateRegistry(Config config)
+        {
             if (config.Update != null && config.Update.Registry && !string.IsNullOrEmpty(config.CommandEndpoints?.Registry) && OperatingSystem.IsWindows())
             {
                 Console.WriteLine("Running Registry Update");
-                var values = await HttpGetJSON<List<JSON.RegEntry>>(config.CommandEndpoints.Registry);
+                var values = await HttpGetJSON<List<RegEntry>>(config.CommandEndpoints.Registry);
                 if (values != null)
                 {
                     using (var key = GetOrCreateMachineKey(@"Software\Wow6432Node\D2Server\D2GS"))
@@ -112,141 +254,45 @@ namespace D2GSMonitor
                     }
                 }
             }
+        }
 
-            var gsInfo = new FileInfo("D2GS.exe");
-            if (gsInfo == null || !gsInfo.Exists)
+        private static async Task DispatchReports(Config config, DateTime now)
+        {
+            if (config.Reporting != null && !string.IsNullOrEmpty(config.CommandEndpoints?.Data))
             {
-                Console.WriteLine("Cannot find D2GS.exe!");
-                return;
-            }
-
-            SetAppCompat(gsInfo.FullName);
-
-            var procInfo = new ProcessStartInfo
-            {
-                FileName = "D2GS.exe",
-                Verb = "runas",
-                UseShellExecute = true
-            };
-
-            while (true)
-            {
-                var start = DateTime.Now;
-                var proc = Process.Start(procInfo);
-                if (proc == null)
+                if (config.Reporting.GamesTime != 0 && (now - reportGamesLast).TotalSeconds >= config.Reporting.GamesTime)
                 {
-                    Console.WriteLine("Unable to start D2GS.exe!");
-                    break;
-                }
-
-                if (!string.IsNullOrEmpty(config.CommandEndpoints?.Events))
-                {
-                    _ = HttpPost(config.CommandEndpoints.Events, JsonConvert.SerializeObject(new JSON.Event
+                    var games = await IssueTelnetCommand(config.Telnet, "gl");
+                    if (!string.IsNullOrEmpty(games))
                     {
-                        Type = "start",
-                        Data = new Dictionary<string, object> {
-                            {"gsname", config.GSName ?? string.Empty},
-                            {"time", DateTime.UtcNow},
-                        }
-                    }));
-                }
-
-                Console.WriteLine("Starting Server");
-                bool restartPending = false;
-                bool deadlockDetected = false;
-                DateTime exitStart = new DateTime(0);
-                DateTime reportGamesLast = DateTime.Now;
-                DateTime reportStatusLast = DateTime.Now;
-                IntPtr watchdogAddress = GetGSWatchDogTimerAddress(proc, config.WatchDog?.TickOffset);
-
-                while (!proc.WaitForExit(2500))
-                {
-                    var now = DateTime.Now;
-
-                    if (restartPending && now - exitStart > _exitWaitTime.Add(TimeSpan.FromSeconds(30)))
-                    {
-                        Console.WriteLine("Force Stopping Server");
-                        proc.Refresh();
-                        proc.CloseMainWindow();
-                        proc.Close();
+                        _ = HttpPost(config.CommandEndpoints.Data, JsonConvert.SerializeObject(new Data<List<Game>>
+                        {
+                            Time = DateTime.UtcNow,
+                            Type = "games",
+                            GSName = config.GSName,
+                            Results = ParseGames(games)
+                        }));
                     }
 
-                    if (config.Telnet != null)
-                    {
-                        if (now - start > _restartTime)
-                        {
-                            Console.WriteLine("Restarting Server");
-                            await IssueTelnetCommand(config.Telnet, $"restart {config.RestartWaitTime}");
-                            restartPending = true;
-                            exitStart = DateTime.Now;
-                        }
-
-                        if (config.Reporting != null && !string.IsNullOrEmpty(config.CommandEndpoints?.Data))
-                        {
-                            if (config.Reporting.GamesTime != 0 && (now - reportGamesLast).TotalSeconds >= config.Reporting.GamesTime)
-                            {
-                                var games = await IssueTelnetCommand(config.Telnet, "gl");
-                                if (!string.IsNullOrEmpty(games))
-                                {
-                                    _ = HttpPost(config.CommandEndpoints.Data, JsonConvert.SerializeObject(new JSON.Data<List<JSON.Game>>
-                                    {
-                                        Time = DateTime.UtcNow,
-                                        Type = "games",
-                                        GSName = config.GSName,
-                                        Results = ParseGames(games)
-                                    }));
-                                }
-
-                                reportGamesLast = now;
-                            }
-
-                            if (config.Reporting.StatusTime != 0 && (now - reportStatusLast).TotalSeconds >= config.Reporting.StatusTime)
-                            {
-                                var status = await IssueTelnetCommand(config.Telnet, "status");
-                                if (!string.IsNullOrEmpty(status))
-                                {
-                                    _ = HttpPost(config.CommandEndpoints.Data, JsonConvert.SerializeObject(new JSON.Data<JSON.ServerStatus>
-                                    {
-                                        Time = DateTime.UtcNow,
-                                        Type = "status",
-                                        GSName = config.GSName,
-                                        Results = ParseStatus(status)
-                                    }));
-                                }
-
-                                reportStatusLast = now;
-                            }
-                        }
-                    }
-
-                    uint watchdog = GetGSWatchDogTimer(proc.Handle, watchdogAddress);
-                    if (watchdog > 0 && config.WatchDog != null && config.WatchDog.Timeout > 0)
-                    {
-                        if (GetTickCount() - watchdog > config.WatchDog.Timeout)
-                        {
-                            Console.WriteLine("D2GE has deadlocked, queing restart");
-                            deadlockDetected = true;
-                            restartPending = true;
-                        }
-                    }
+                    reportGamesLast = now;
                 }
 
-                var reason = restartPending ? "routine" : (deadlockDetected ? "deadlock" : "crash");
-                if (!string.IsNullOrEmpty(config.CommandEndpoints?.Events))
+                if (config.Reporting.StatusTime != 0 && (now - reportStatusLast).TotalSeconds >= config.Reporting.StatusTime)
                 {
-                    _ = HttpPost(config.CommandEndpoints.Events, JsonConvert.SerializeObject(new JSON.Event
+                    var status = await IssueTelnetCommand(config.Telnet, "status");
+                    if (!string.IsNullOrEmpty(status))
                     {
-                        Type = "restart",
-                        Data = new Dictionary<string, object> {
-                            {"gsname", config.GSName ?? string.Empty},
-                            {"time", DateTime.UtcNow},
-                            {"reason", reason}
-                        }
-                    }));
-                }
+                        _ = HttpPost(config.CommandEndpoints.Data, JsonConvert.SerializeObject(new Data<ServerStatus>
+                        {
+                            Time = DateTime.UtcNow,
+                            Type = "status",
+                            GSName = config.GSName,
+                            Results = ParseStatus(status)
+                        }));
+                    }
 
-                Console.WriteLine($"Server Stopped ({reason})");
-                Thread.Sleep(1000);
+                    reportStatusLast = now;
+                }
             }
         }
 
@@ -371,7 +417,7 @@ namespace D2GSMonitor
 
         private static ServerStatus ParseStatus(string status)
         {
-            var entries = status.Split(new char[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            var entries = status.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
             var vmem = SkipAndTrim(entries[10]).Replace("MB", string.Empty).Split('/');
             var pmem = SkipAndTrim(entries[9]).Replace("MB", string.Empty).Split('/');
             return new ServerStatus
@@ -455,7 +501,7 @@ namespace D2GSMonitor
         private static List<Game> ParseGames(string games)
         {
             var gameslist = new List<Game>();
-            var entries = games.Split(new char[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            var entries = games.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
             if (entries.Length > 1)
             {
                 foreach (var e in entries.Skip(1).SkipLast(2))
@@ -488,8 +534,13 @@ namespace D2GSMonitor
             return false;
         }
 
-        static async Task<string?> IssueTelnetCommand(TelnetInfo Info, string Comamnd)
+        static async Task<string?> IssueTelnetCommand(TelnetInfo? Info, string Comamnd)
         {
+            if (Info == null)
+            {
+                return null;
+            }
+
             using (var client = new Client("localhost", Info.Port, new CancellationToken()))
             {
                 if (await TrySendPassword(client, 500, Info.Password ?? string.Empty))

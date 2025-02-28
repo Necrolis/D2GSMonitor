@@ -83,6 +83,8 @@ namespace D2GSMonitor
         {
             [JsonProperty("gsname")]
             public string? GSName { get; set; }
+            [JsonProperty("executable")]
+            public string? GSExecutablePath { get; set; }
             [JsonProperty("endpoints")]
             public EndpointInfo? CommandEndpoints { get; set; }
             [JsonProperty("auth")]
